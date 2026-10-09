@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meme Battle</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { background: radial-gradient(circle at 20% 0%, #312e81, #0f172a 60%); min-height: 100vh; color: #f1f5f9; }
+    .view { display: none; animation: pop .35s ease; }
+    .view.on { display: block; }
+    @keyframes pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+    .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(10px); border-radius: 1.25rem; }
+    .btn { padding: .65rem 1.2rem; border-radius: .9rem; font-weight: 700; transition: transform .15s, filter .15s; }
+    .btn:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.1); }
+    .btn:active:not(:disabled) { transform: scale(.96); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .meme { position: relative; container-type: inline-size; background: #000; border-radius: 1rem; overflow: hidden; width: 100%; max-width: 640px; margin: auto; user-select: none; }
+    .meme img, .meme video { width: 100%; display: block; max-height: 60vh; object-fit: contain; }
+    .t { position: absolute; transform: translate(-50%, -50%); font-family: Impact, 'Arial Black', sans-serif; font-weight: 900; text-align: center;
+         white-space: pre-wrap; line-height: 1.1; max-width: 96%; text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0 3px 6px #000; }
+    .t.edit { cursor: move; touch-action: none; padding: 2px 6px; outline: 2px dashed transparent; }
+    .t.edit.sel { outline-color: #a78bfa; }
+    .pulse { animation: pulse .6s ease infinite alternate; }
+    @keyframes pulse { to { transform: scale(1.12); } }
+    input[type=text] { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); border-radius: .8rem; padding: .65rem 1rem; outline: none; width: 100%; }
+    input[type=text]:focus { border-color: #a78bfa; }
+  </style>
+</head>
+<body class="p-4">
+  <div class="max-w-3xl mx-auto">
+    <h1 class="text-center text-4xl font-black my-4 bg-gradient-to-r from-pink-400 to-indigo-400 bg-clip-text text-transparent">🎭 Meme Battle</h1>
+    <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 bg-rose-500 px-4 py-2 rounded-xl font-semibold hidden z-50"></div>
+
+    <!-- ACCUEIL -->
+    <section id="v-home" class="view on card p-6 space-y-3">
+      <input id="name" type="text" maxlength="16" placeholder="Ton pseudo" />
+      <button id="btn-create" class="btn w-full bg-indigo-500">Créer un salon</button>
+      <div class="flex gap-2">
+        <input id="code" type="text" maxlength="4" placeholder="CODE" class="uppercase" />
+        <button id="btn-join" class="btn bg-pink-500">Rejoindre</button>
+      </div>
+    </section>
+
+    <!-- LOBBY -->
+    <section id="v-lobby" class="view card p-6 space-y-4">
+      <div class="text-center">
+        <div class="text-sm text-slate-400">Code du salon</div>
+        <div id="l-code" class="text-5xl font-black tracking-widest"></div>
+      </div>
+      <div id="l-players" class="flex flex-wrap gap-2 justify-center"></div>
+      <label class="block border-2 border-dashed border-white/20 rounded-2xl p-5 text-center cursor-pointer hover:border-violet-400 transition">
+        📤 Ajoute ton média à la banque (JPG, PNG, GIF, MP4 ≤ 10 s)
+        <input id="file" type="file" class="hidden" accept="image/jpeg,image/png,image/gif,video/mp4" />
+      </label>
+      <div class="text-center text-slate-300">Banque : <b id="l-bank">4</b> médias</div>
+      <div id="l-host" class="hidden flex items-center justify-center gap-3">
+        <span>Manches :</span><input id="rounds" type="number" min="1" max="10" value="3" class="w-16 bg-white/10 rounded-lg p-2 text-center" />
+        <button id="btn-start" class="btn bg-emerald-500">Lancer la partie 🚀</button>
+      </div>
+      <div id="l-wait" class="text-center text-slate-400">En attente de l'hôte…</div>
+    </section>
+
+    <!-- CRÉATION -->
+    <section id="v-create" class="view card p-4 space-y-3">
+      <div class="flex justify-between items-center">
+        <div id="c-round" class="font-bold"></div>
+        <div id="c-timer" class="text-2xl font-black"></div>
+        <button id="btn-reroll" class="btn bg-white/10 text-sm">🔄 Changer <span id="c-left">10/10</span></button>
+      </div>
+      <div id="c-box" class="meme"></div>
+      <div class="flex flex-wrap gap-2 items-center justify-center">
+        <button id="btn-addtext" class="btn bg-indigo-500">➕ Texte</button>
+        <div id="c-tools" class="hidden flex items-center gap-2">
+          <input id="t-size" type="range" min="2" max="30" step="0.5" />
+          <input id="t-color" type="color" class="w-9 h-9 rounded bg-transparent" />
+          <button id="t-del" class="btn bg-rose-500 py-1">🗑</button>
+        </div>
+        <button id="btn-submit" class="btn bg-emerald-500">Envoyer ✅</button>
+      </div>
+      <p class="text-center text-xs text-slate-400">Glisse le texte pour le placer · double-clic pour l'éditer</p>
+    </section>
+
+    <!-- VOTE -->
+    <section id="v-vote" class="view card p-4 space-y-3">
+      <div class="flex justify-between"><b id="v-count"></b><b id="v-timer" class="text-xl"></b></div>
+      <div id="v-box" class="meme"></div>
+      <div id="v-btns" class="grid grid-cols-3 gap-2">
+        <button data-v="top" class="btn bg-emerald-500">🔥 Top <small>+2</small></button>
+        <button data-v="meh" class="btn bg-amber-500">😐 Mouais <small>0</small></button>
+        <button data-v="flop" class="btn bg-rose-500">💩 Flop <small>-1</small></button>
+      </div>
+      <div id="v-msg" class="text-center text-slate-300 h-6"></div>
+    </section>
+
+    <!-- SCORES / FIN -->
+    <section id="v-scores" class="view card p-6 text-center space-y-3">
+      <h2 id="s-title" class="text-2xl font-black"></h2>
+      <ol id="s-list" class="space-y-2"></ol>
+    </section>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
